@@ -154,6 +154,10 @@
 //!             # return Ok(());
 //!         },
 //!
+//!         Ok((stream_id, quiche::h3::Event::StreamClosed())) => {
+//!             // Peer terminated stream, handle it.
+//!         }
+//!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
 //!             break;
@@ -188,6 +192,10 @@
 //!             println!("Received {} bytes of payload on stream {}",
 //!                      data.len(), stream_id);
 //!         },
+//!
+//!         Ok((stream_id, quiche::h3::Event::StreamClosed())) => {
+//!             // Peer terminated stream, handle it.
+//!         }
 //!
 //!         Err(quiche::h3::Error::Done) => {
 //!             // Done reading.
@@ -456,6 +464,9 @@ pub enum Event {
 
     /// Data was received.
     Data(Vec<u8>),
+
+    // Stream was closed,
+    StreamClosed(),
 }
 
 struct ConnectionSettings {
@@ -884,6 +895,10 @@ impl Connection {
                         // TODO: implement CANCEL_PUSH frame
                     },
                 }
+            }
+
+            if conn.stream_finished(*stream_id) {
+                return Ok((*stream_id, Event::StreamClosed()));
             }
         }
 
@@ -1432,6 +1447,8 @@ mod tests {
         let mut s = Session::default().unwrap();
         s.handshake(&mut buf).unwrap();
 
+        let mut control_stream_closed = false;
+
         send_frame(
             &mut s.pipe.client,
             frame::Frame::MaxPushId { push_id: 1 },
@@ -1450,14 +1467,16 @@ mod tests {
                     break;
                 },
 
+                 Err(Error::ClosedCriticalStream) => {
+                    control_stream_closed = true;
+                    break;
+                },
+
                 Err(_) => (),
             }
         }
 
-        assert_eq!(
-            s.server.poll(&mut s.pipe.server),
-            Err(Error::ClosedCriticalStream)
-        );
+        assert!(control_stream_closed);
     }
 
     #[test]
@@ -1466,6 +1485,8 @@ mod tests {
 
         let mut s = Session::default().unwrap();
         s.handshake(&mut buf).unwrap();
+
+        let mut qpack_stream_closed = false;
 
         send_frame(
             &mut s.pipe.client,
@@ -1485,14 +1506,16 @@ mod tests {
                     break;
                 },
 
+                Err(Error::ClosedCriticalStream) => {
+                    qpack_stream_closed = true;
+                    break;
+                },
+
                 Err(_) => (),
             }
         }
 
-        assert_eq!(
-            s.server.poll(&mut s.pipe.server),
-            Err(Error::ClosedCriticalStream)
-        );
+        assert!(qpack_stream_closed);
     }
 
 }
